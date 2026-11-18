@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tasky</title>
+  <style>
+    body { font-family: Segoe UI, Arial, sans-serif; background: #f2f4f8; margin: 0; color: #1c2333; }
+    main { max-width: 460px; margin: 48px auto; background: #fff; padding: 24px 28px; border-radius: 12px; box-shadow: 0 4px 18px rgba(0, 0, 0, .08); }
+    h1 { margin-top: 0; }
+    label { display: block; margin: 12px 0 4px; font-weight: 600; }
+    input[type=text], input[type=password] { width: 100%; padding: 9px; border: 1px solid #b8c0cc; border-radius: 6px; box-sizing: border-box; font-size: 15px; }
+    button { padding: 9px 14px; border: 0; border-radius: 6px; background: #2563eb; color: #fff; font-size: 15px; cursor: pointer; }
+    button.link { background: none; color: #2563eb; padding: 0; }
+    button.danger { background: #fff; color: #b42318; border: 1px solid #f0b4ae; padding: 4px 10px; font-size: 13px; }
+    #login-form button { margin-top: 16px; }
+    .top { display: flex; justify-content: space-between; align-items: center; }
+    .add { display: flex; gap: 8px; align-items: end; }
+    .add div { flex: 1; }
+    ul { list-style: none; padding: 0; }
+    li { display: flex; justify-content: space-between; align-items: center; padding: 9px 0; border-bottom: 1px solid #e6e9ef; }
+    li label { margin: 0; font-weight: 400; display: flex; gap: 8px; align-items: center; }
+    li.done span { text-decoration: line-through; color: #8a93a3; }
+    [role=alert] { background: #fdecea; color: #b42318; padding: 9px 12px; border-radius: 6px; margin-top: 12px; }
+    .muted { color: #667085; }
+  </style>
+</head>
+<body>
+<main>
+  <!-- Screen 1: the login form -->
+  <section id="login-view" hidden>
+    <h1>Welcome to Tasky</h1>
+    <form id="login-form">
+      <label for="username">Username</label>
+      <input id="username" type="text" autocomplete="username">
+      <label for="password">Password</label>
+      <input id="password" type="password" autocomplete="current-password">
+      <button type="submit">Log in</button>
+      <p id="login-error" role="alert" hidden></p>
+    </form>
+  </section>
+
+  <!-- Screen 2: the task list -->
+  <section id="app-view" hidden>
+    <div class="top">
+      <h1>My tasks</h1>
+      <button id="logout" class="link" type="button">Log out</button>
+    </div>
+    <p id="hello" class="muted"></p>
+    <form id="add-form" class="add">
+      <div>
+        <label for="new-task">New task</label>
+        <input id="new-task" type="text" placeholder="What needs doing?">
+      </div>
+      <button type="submit">Add</button>
+    </form>
+    <p id="load-error" role="alert" hidden></p>
+    <p id="empty" class="muted" hidden>Nothing to do. Enjoy your day!</p>
+    <ul id="list"></ul>
+    <p data-testid="counter" class="muted"></p>
+  </section>
+</main>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  let todos = [];
+
+  async function api(method, url, body) {
+    const res = await fetch(url, {
+      method,
+      headers: body ? { 'Content-Type': 'application/json' } : {},
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    const data = res.status === 204 ? null : await res.json().catch(() => null);
+    return { ok: res.ok, status: res.status, data };
+  }
+
+  function show(view) {
+    $('login-view').hidden = view !== 'login';
+    $('app-view').hidden = view !== 'app';
+  }
+
+  function render() {
+    const list = $('list');
+    list.replaceChildren();
+    for (const todo of todos) {
+      const li = document.createElement('li');
+      if (todo.done) li.className = 'done';
+
+      const label = document.createElement('label');
+      const box = document.createElement('input');
+      box.type = 'checkbox';
+      box.checked = todo.done;
+      box.addEventListener('change', () => toggle(todo, box.checked));
+      const text = document.createElement('span');
+      text.textContent = todo.title;
+      label.append(box, text);
+
+      const del = document.createElement('button');
+      del.type = 'button';
+      del.className = 'danger';
+      del.textContent = 'Delete';
+      del.setAttribute('aria-label', 'Delete ' + todo.title);
+      del.addEventListener('click', () => remove(todo));
+
+      li.append(label, del);
+      list.append(li);
+    }
+    const left = todos.filter((t) => !t.done).length;
+    document.querySelector('[data-testid=counter]').textContent =
+      left + (left === 1 ? ' task left' : ' tasks left');
+    $('empty').hidden = todos.length > 0;
+  }
+
+  async function loadTodos() {
+    const res = await api('GET', '/api/todos');
+    if (!res.ok) {
+      $('load-error').textContent = 'Could not load your tasks. Try again later.';
+      $('load-error').hidden = false;
+      return;
+    }
+    $('load-error').hidden = true;
+    todos = res.data;
+    render();
+  }
+
+  async function toggle(todo, done) {
+    await api('PATCH', '/api/todos/' + todo.id, { done });
+    await loadTodos();
+  }
+
+  async function remove(todo) {
+    await api('DELETE', '/api/todos/' + todo.id);
+    await loadTodos();
+  }
+
+  async function enterApp(username) {
+    $('hello').textContent = 'Hello, ' + username;
+    show('app');
+    await loadTodos();
+  }
+
+  $('login-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    $('login-error').hidden = true;
+    const res = await api('POST', '/api/login', {
+      username: $('username').value,
+      password: $('password').value,
+    });
+    if (!res.ok) {
+      $('login-error').textContent = res.data ? res.data.error : 'Login failed';
+      $('login-error').hidden = false;
+      return;
+    }
+    $('password').value = '';
+    await enterApp(res.data.username);
+  });
+
+  $('add-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const title = $('new-task').value.trim();
+    if (!title) return;
+    await api('POST', '/api/todos', { title });
+    $('new-task').value = '';
+    await loadTodos();
+  });
+
+  $('logout').addEventListener('click', async () => {
+    await api('POST', '/api/logout');
+    show('login');
+  });
+
+  // On page load: are we already logged in?
+  api('GET', '/api/me').then((res) => (res.ok ? enterApp(res.data.username) : show('login')));
+</script>
+</body>
+</html>
