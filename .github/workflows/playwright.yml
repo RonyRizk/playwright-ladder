@@ -15,9 +15,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
+      - name: Get the code
+        uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v7
+      - name: Install Node.js
+        uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -38,3 +40,13 @@ jobs:
           name: playwright-report
           path: playwright-report/
           retention-days: 7
+
+  deploy:
+    needs: e2e
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Tell Render to deploy the new code
+        env:
+          DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
+        run: curl -fsS -X POST "$DEPLOY_HOOK"
